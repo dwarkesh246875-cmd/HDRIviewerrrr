@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>HDRI Viewer</title>
+<style>
+:root{--page:#e9ecf1;--panel:rgba(255,255,255,.86);--fg:#14161a;--muted:#5b6472;--accent:#2d6cdf;--on-accent:#fff;--line:rgba(0,0,0,.14);box-sizing:border-box}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--page:#0d0f12;--panel:rgba(20,22,27,.82);--fg:#eef1f5;--muted:#9aa4b2;--accent:#6ea0ff;--on-accent:#0d0f12;--line:rgba(255,255,255,.16)}}
+:root[data-theme="dark"]{--page:#0d0f12;--panel:rgba(20,22,27,.82);--fg:#eef1f5;--muted:#9aa4b2;--accent:#6ea0ff;--on-accent:#0d0f12;--line:rgba(255,255,255,.16)}
+html,body{height:100%;margin:0;background:var(--page);color:var(--fg);font:15px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;overflow:hidden}
+canvas{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none;cursor:grab}
+#ui{position:fixed;top:calc(12px + env(safe-area-inset-top,0px));left:12px;width:min(320px,calc(100% - 24px));max-height:calc(100% - 24px - env(safe-area-inset-top,0px));overflow:auto;box-sizing:border-box;padding:16px;border:1px solid var(--line);border-radius:16px;background:var(--panel);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
+h1{margin:0 0 12px;font-size:17px;letter-spacing:.02em}
+.btn{display:block;width:100%;box-sizing:border-box;padding:12px;border:1px solid var(--line);border-radius:12px;background:transparent;color:var(--fg);font:inherit;font-weight:600;text-align:center;cursor:pointer}
+.btn.primary{background:var(--accent);border-color:transparent;color:var(--on-accent);margin-top:12px}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+#f{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+#msg{margin:10px 0 12px;color:var(--muted);font-size:13px;word-break:break-word}
+#msg.err{color:#d6453d}
+.row{margin:10px 0}.row label{display:flex;justify-content:space-between;font-size:13px;color:var(--muted)}
+input[type=range]{width:100%;accent-color:var(--accent)}
+.chk{display:flex;gap:8px;align-items:center;font-size:13px;color:var(--muted);margin-top:8px}
+.hint{margin:12px 0 0;font-size:12px;color:var(--muted)}
+body.drag #ui{outline:2px dashed var(--accent)}
+.tools{display:flex;gap:10px;align-items:center}.tools .btn{width:auto;flex:none;padding:8px 14px}.tools label{display:flex;gap:6px;align-items:center;justify-content:flex-start;font-size:13px;color:var(--muted)}.tools .chk{margin:0}
+#fps{width:56px;box-sizing:border-box;padding:6px;border:1px solid var(--line);border-radius:8px;background:transparent;color:var(--fg);font:inherit}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<main id="ui">
+  <h1>HDRI Viewer</h1>
+  <label class="btn" for="f">Open HDRI / PNG…</label>
+  <input id="f" type="file" multiple>
+  <p id="msg">Pick a .hdr, .exr or .png — select several PNGs to play them as a sequence.</p>
+  <div class="row"><label for="ev">Exposure <output id="evo">0.0 EV</output></label><input id="ev" type="range" min="-5" max="5" step="0.1" value="0"></div>
+  <div class="row"><label for="rot">Rotation <output id="roto">0°</output></label><input id="rot" type="range" min="-180" max="180" step="1" value="0"></div>
+  <div id="seq" hidden>
+    <div class="row"><label for="fr">Frame <output id="fro">1 / 1</output></label><input id="fr" type="range" min="0" max="0" step="1" value="0"></div>
+    <div class="row tools"><button id="play" class="btn" type="button">Pause</button><label>FPS <input id="fps" type="number" min="1" max="120" value="24"></label><label class="chk"><input id="loop" type="checkbox" checked> Loop</label></div>
+  </div>
+  <label class="chk"><input id="tm" type="checkbox" checked> Filmic tone mapping</label>
+  <button id="vr" class="btn primary" disabled>Enter VR</button>
+  <p class="hint">In VR: thumbsticks left/right rotate, up/down change exposure; trigger plays/pauses, grip restarts. On desktop, drag to look and scroll to zoom.</p>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/fflate@0.7.4/umd/index.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/RGBELoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/EXRLoader.js"></script>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+  const cv = $('c');
+
+  const renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: true });
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.outputEncoding = THREE.sRGBEncoding;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.xr.enabled = true;
+
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(75, 1, 0.1, 200);
+  camera.rotation.order = 'YXZ';
+
+  const geo = new THREE.SphereGeometry(50, 96, 48);
+  geo.scale(-1, 1, 1);
+  const mat = new THREE.MeshBasicMaterial({ color: 0xffffff, depthWrite: false });
+  const sphere = new THREE.Mesh(geo, mat);
+  sphere.visible = false;
+  scene.add(sphere);
+
+  let ev = 0, yaw = 0, lookYaw = 0, lookPitch = 0, tex = null, loaded = false, vrOK = false;
+
+  function msg(t, err) { const m = $('msg'); m.textContent = t; m.className = err ? 'err' : ''; }
+  function sync() {
+    $('ev').value = ev; $('evo').textContent = ev.toFixed(1) + ' EV';
+    const d = Math.round(((yaw * 180 / Math.PI + 540) % 360) - 180);
+    $('rot').value = d; $('roto').textContent = d + '°';
+  }
+  function resize() {
+    if (renderer.xr.isPresenting) return;
+    renderer.setSize(innerWidth, innerHeight, false);
+    camera.aspect = innerWidth / innerHeight;
+    camera.updateProjectionMatrix();
+  }
+  addEventListener('resize', resize); resize();
+
+  /* Local file loading: feed the picked file's bytes through three's own loaders
+     without any network request (a sentinel URL is intercepted by FileLoader). */
+  let pending = null;
+  const origLoad = THREE.FileLoader.prototype.load;
+  THREE.FileLoader.prototype.load = function (url, onLoad, ...rest) {
+    if (url === 'local://') { setTimeout(() => onLoad(pending), 0); return; }
+    return origLoad.call(this, url, onLoad, ...rest);
+  };
+
+  async function openFile(file) {
+    if (!file) return;
+    const ext = file.name.split('.').pop().toLowerCase();
+    if (ext !== 'hdr' && ext !== 'exr') { msg('Please choose a .hdr or .exr file.', true); return; }
+    msg('Reading ' + file.name + '…');
+    try { pending = await file.arrayBuffer(); } catch (e) { msg('Couldn’t read that file.', true); return; }
+    const loader = ext === 'exr' ? new THREE.EXRLoader() : new THREE.RGBELoader();
+    loader.load('local://', t => {
+      if (tex) tex.dispose();
+      clearSeq(); setTone(true); tex = t; mat.map = t; loaded = true; sphere.visible = true; mat.needsUpdate = true;
+      const w = t.image.width, h = t.image.height;
+      msg(file.name + ' · ' + w + '×' + h + (Math.max(w, h) > renderer.capabilities.maxTextureSize ? ' — larger than this GPU supports, may not display' : ''));
+      pending = null; updVR();
+    }, undefined, err => {
+      console.error(err);
+      msg('Couldn’t decode this file. For EXR, DWAA/DWAB compression isn’t supported — re-save as ZIP or PIZ.', true);
+    });
+  }
+  $('f').addEventListener('change', e => { openFiles(e.target.files); e.target.value = ''; });
+  addEventListener('dragover', e => { e.preventDefault(); document.body.classList.add('drag'); });
+  addEventListener('dragleave', () => document.body.classList.remove('drag'));
+  addEventListener('drop', e => { e.preventDefault(); document.body.classList.remove('drag'); openFiles(e.dataTransfer.files); });
+
+  /* PNG stills + sequences (frames are decoded on demand, so long sequences don’t exhaust memory) */
+  function setTone(filmic) {
+    $('tm').checked = filmic;
+    renderer.toneMapping = filmic ? THREE.ACESFilmicToneMapping : THREE.LinearToneMapping;
+    mat.needsUpdate = true;
+  }
+  let seq = null, acc = 0, tok = 0, fps = 24;
+  const IMG = ['png', 'jpg', 'jpeg', 'webp'];
+  const extOf = f => f.name.split('.').pop().toLowerCase();
+  const decode = f => createImageBitmap(f, { imageOrientation: 'flipY', premultiplyAlpha: 'none', colorSpaceConversion: 'none' });
+  function clearSeq() {
+    if (seq) for (const e of seq.cache.values()) if (e.bmp) e.bmp.close();
+    seq = null; $('seq').hidden = true;
+  }
+  function load(i) {
+    const s = seq; let e = s.cache.get(i);
+    if (!e) {
+      e = { bmp: null };
+      e.p = decode(s.files[i]).then(b => { if (s.cache.get(i) !== e) b.close(); else e.bmp = b; }, () => { e.err = true; });
+      s.cache.set(i, e);
+    }
+    return e;
+  }
+  function syncSeq() {
+    if (!seq) return;
+    $('fr').value = seq.cur; $('fro').textContent = (seq.cur + 1) + ' / ' + seq.n;
+    $('play').textContent = seq.playing ? 'Pause' : 'Play';
+  }
+  function show(i, e) { seq.cur = i; tex.image = e.bmp; tex.needsUpdate = true; syncSeq(); }
+  function togglePlay() { if (seq && seq.n > 1) { seq.playing = !seq.playing; acc = 0; syncSeq(); } }
+  async function seekTo(i) {
+    const s = seq; if (!s) return;
+    const k = ++tok; s.want = i;
+    const e = load(i);
+    if (!e.bmp && !e.err) await e.p;
+    if (s !== seq || k !== tok) return;
+    s.want = -1;
+    if (e.bmp) { show(i, e); acc = 0; } else msg('Couldn’t decode ' + s.files[i].name, true);
+  }
+  function stepSeq(dt) {
+    const s = seq; if (!s || s.n < 2) return;
+    const keep = new Set([s.want]);
+    for (let k = -1; k <= s.ahead; k++) keep.add((((s.cur + k) % s.n) + s.n) % s.n);
+    let busy = 0;
+    for (const [i, e] of s.cache) {
+      if (!keep.has(i)) { if (e.bmp) e.bmp.close(); s.cache.delete(i); }
+      else if (!e.bmp && !e.err) busy++;
+    }
+    for (let k = 1; k <= s.ahead && busy < 3; k++) { const i = (s.cur + k) % s.n; if (!s.cache.has(i)) { load(i); busy++; } }
+    if (!s.playing) return;
+    acc = Math.min(acc + dt * fps, 2);
+    if (acc < 1) return;
+    let nx = s.cur + 1;
+    if (nx >= s.n) { if (!$('loop').checked) { s.playing = false; syncSeq(); return; } nx = 0; }
+    const e = s.cache.get(nx);
+    if (!e || (!e.bmp && !e.err)) return; // next frame still decoding: hold
+    if (e.err || e.bmp.width !== s.w || e.bmp.height !== s.h) {
+      s.playing = false; syncSeq(); msg('Frame ' + s.files[nx].name + ' failed to decode or has a different size.', true); return;
+    }
+    acc -= 1; show(nx, e);
+  }
+  async function openFiles(list) {
+    const files = [...list];
+    if (!files.length) return;
+    const imgs = files.filter(f => IMG.includes(extOf(f))).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+    if (!imgs.length) {
+      const h = files.find(f => ['hdr', 'exr'].includes(extOf(f)));
+      if (h) return openFile(h);
+      msg('Please choose .hdr, .exr or .png files.', true); return;
+    }
+    msg('Decoding ' + imgs[0].name + '…');
+    let first;
+    try { first = await decode(imgs[0]); } catch (e) { msg('Couldn’t decode ' + imgs[0].name, true); return; }
+    clearSeq();
+    const n = imgs.length, w = first.width, h = first.height;
+    if (tex) tex.dispose();
+    const t = new THREE.Texture(first);
+    t.encoding = THREE.sRGBEncoding; t.flipY = false; t.wrapS = THREE.RepeatWrapping;
+    t.minFilter = THREE.LinearFilter; t.magFilter = THREE.LinearFilter; t.generateMipmaps = false;
+    if (n === 1) { t.generateMipmaps = true; t.minFilter = THREE.LinearMipmapLinearFilter; t.anisotropy = renderer.capabilities.getMaxAnisotropy(); }
+    t.needsUpdate = true;
+    tex = t; mat.map = t; loaded = true; sphere.visible = true; setTone(false); updVR();
+    seq = { files: imgs, n, w, h, cur: 0, want: -1, cache: new Map([[0, { bmp: first }]]), ahead: clamp(Math.floor(3.5e8 / (w * h * 4)), 2, 12), playing: n > 1 };
+    acc = 0; $('seq').hidden = n < 2; $('fr').max = n - 1; syncSeq();
+    const big = Math.max(w, h) > renderer.capabilities.maxTextureSize;
+    msg((n > 1 ? n + ' frames · ' : imgs[0].name + ' · ') + w + '×' + h +
+      (big ? ' — larger than this GPU supports, may not display' : n > 1 && w > 4096 ? ' — large frames may play slower than real time' : ''));
+  }
+  $('play').addEventListener('click', togglePlay);
+  $('fps').addEventListener('input', e => { fps = clamp(+e.target.value || 24, 1, 120); });
+  $('fr').addEventListener('input', e => { if (seq) seq.playing = false; seekTo(+e.target.value); });
+  renderer.xr.addEventListener('sessionstart', () => {
+    const ss = renderer.xr.getSession();
+    ss.addEventListener('selectstart', togglePlay);
+    ss.addEventListener('squeezestart', () => seekTo(0));
+  });
+
+  /* Controls */
+  $('ev').addEventListener('input', e => { ev = +e.target.value; sync(); });
+  $('rot').addEventListener('input', e => { yaw = +e.target.value * Math.PI / 180; sync(); });
+  $('tm').addEventListener('change', e => {
+    renderer.toneMapping = e.target.checked ? THREE.ACESFilmicToneMapping : THREE.LinearToneMapping;
+    mat.needsUpdate = true;
+  });
+  let drag = null;
+  cv.addEventListener('pointerdown', e => { drag = [e.clientX, e.clientY]; cv.setPointerCapture(e.pointerId); cv.style.cursor = 'grabbing'; });
+  cv.addEventListener('pointermove', e => {
+    if (!drag) return;
+    const k = 0.004 * camera.fov / 75;
+    lookYaw += (e.clientX - drag[0]) * k;
+    lookPitch = clamp(lookPitch + (e.clientY - drag[1]) * k, -1.5, 1.5);
+    drag = [e.clientX, e.clientY];
+  });
+  const endDrag = () => { drag = null; cv.style.cursor = 'grab'; };
+  cv.addEventListener('pointerup', endDrag); cv.addEventListener('pointercancel', endDrag);
+  cv.addEventListener('wheel', e => {
+    e.preventDefault();
+    camera.fov = clamp(camera.fov + e.deltaY * 0.03, 25, 100);
+    camera.updateProjectionMatrix();
+  }, { passive: false });
+
+  /* VR */
+  const vr = $('vr');
+  function updVR() { vr.disabled = !(vrOK && loaded); }
+  if (navigator.xr) {
+    navigator.xr.isSessionSupported('immersive-vr').then(ok => {
+      vrOK = ok; if (!ok) vr.textContent = 'VR not available on this device'; updVR();
+    }).catch(() => { vr.textContent = 'VR not available on this device'; });
+  } else vr.textContent = 'WebXR not supported in this browser';
+  vr.addEventListener('click', async () => {
+    try {
+      const s = await navigator.xr.requestSession('immersive-vr', { optionalFeatures: ['local-floor'] });
+      renderer.xr.setReferenceSpaceType('local');
+      await renderer.xr.setSession(s);
+    } catch (e) { msg('Couldn’t start VR: ' + e.message, true); }
+  });
+  renderer.xr.addEventListener('sessionend', resize);
+
+  /* Loop */
+  let last = performance.now();
+  renderer.setAnimationLoop(() => {
+    const now = performance.now(), dt = Math.min(0.05, (now - last) / 1000); last = now;
+    stepSeq(dt);
+    const s = renderer.xr.getSession();
+    if (s) {
+      let moved = false;
+      for (const src of s.inputSources) {
+        const a = src.gamepad && src.gamepad.axes;
+        if (!a || a.length < 4) continue;
+        if (Math.abs(a[2]) > 0.2) { yaw += a[2] * dt * 1.5; moved = true; }
+        if (Math.abs(a[3]) > 0.2) { ev = clamp(ev - a[3] * dt * 2, -5, 5); moved = true; }
+      }
+      if (moved) sync();
+    } else camera.rotation.set(lookPitch, lookYaw, 0);
+    sphere.rotation.y = yaw;
+    renderer.toneMappingExposure = Math.pow(2, ev);
+    renderer.render(scene, camera);
+  });
+})();
+</script>
+</body>
+</html>
