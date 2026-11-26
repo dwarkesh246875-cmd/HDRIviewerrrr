@@ -15,7 +15,7 @@ h1{margin:0 0 12px;font-size:17px;letter-spacing:.02em}
 .btn{display:block;width:100%;box-sizing:border-box;padding:12px;border:1px solid var(--line);border-radius:12px;background:transparent;color:var(--fg);font:inherit;font-weight:600;text-align:center;cursor:pointer}
 .btn.primary{background:var(--accent);border-color:transparent;color:var(--on-accent);margin-top:12px}
 .btn:disabled{opacity:.45;cursor:not-allowed}
-#f{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+#f,#fd{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
 #msg{margin:10px 0 12px;color:var(--muted);font-size:13px;word-break:break-word}
 #msg.err{color:#d6453d}
 .row{margin:10px 0}.row label{display:flex;justify-content:space-between;font-size:13px;color:var(--muted)}
@@ -25,25 +25,44 @@ input[type=range]{width:100%;accent-color:var(--accent)}
 body.drag #ui{outline:2px dashed var(--accent)}
 .tools{display:flex;gap:10px;align-items:center}.tools .btn{width:auto;flex:none;padding:8px 14px}.tools label{display:flex;gap:6px;align-items:center;justify-content:flex-start;font-size:13px;color:var(--muted)}.tools .chk{margin:0}
 #fps{width:56px;box-sizing:border-box;padding:6px;border:1px solid var(--line);border-radius:8px;background:transparent;color:var(--fg);font:inherit}
+.pick{display:flex;gap:8px}.pick .btn{width:auto;flex:1}
+[hidden]{display:none!important}
+.lhead{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;font-weight:700}.lhead button{border:0;background:transparent;color:var(--fg);font-size:24px;line-height:1;padding:2px 8px;cursor:pointer}
+#lib{position:fixed;top:calc(12px + env(safe-area-inset-top,0px));right:12px;width:min(440px,calc(100% - 24px));max-height:calc(100% - 24px - env(safe-area-inset-top,0px));overflow:auto;box-sizing:border-box;padding:14px 16px;border:1px solid var(--line);border-radius:16px;background:var(--panel);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
+#lib[hidden]{display:none}
+#st{width:100%;box-sizing:border-box;margin-top:4px;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--page);color:var(--fg);font:inherit}
+#lib h2{margin:14px 0 8px;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}#lib h2:first-child{margin-top:0}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px}
+.tile{display:block;padding:0;border:2px solid transparent;border-radius:10px;overflow:hidden;background:var(--page);color:var(--fg);font:inherit;text-align:left;cursor:pointer}
+.tile.on{border-color:var(--accent)}
+.tile canvas,.tile .ph{display:block;position:static;inset:auto;width:100%;height:auto;aspect-ratio:2/1;background:var(--line);touch-action:auto;cursor:inherit}
+.tile .ph{display:flex;align-items:center;justify-content:center;font-weight:700;color:var(--muted)}
+.tile b{display:block;padding:5px 7px 0;font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tile i{display:block;padding:0 7px 6px;font-size:11px;font-style:normal;color:var(--muted)}
+@media (max-width:760px){#lib{top:auto;bottom:12px;left:12px;right:12px;width:auto;max-height:40%}}
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
 <main id="ui">
   <h1>HDRI Viewer</h1>
-  <label class="btn" for="f">Open HDRI / PNG…</label>
+  <div class="pick"><label class="btn" for="f">Open files…</label><label class="btn" for="fd">Open folder…</label></div>
+  <button id="libbtn" class="btn" type="button" style="margin-top:8px" hidden>Hide thumbnails</button>
   <input id="f" type="file" multiple>
-  <p id="msg">Pick a .hdr, .exr or .png — select several PNGs to play them as a sequence.</p>
+  <input id="fd" type="file" webkitdirectory multiple>
+  <p id="msg">Pick files or a folder of .png, .exr or .hdr. Numbered frames (name_0001.png) group into sequences.</p>
   <div class="row"><label for="ev">Exposure <output id="evo">0.0 EV</output></label><input id="ev" type="range" min="-5" max="5" step="0.1" value="0"></div>
   <div class="row"><label for="rot">Rotation <output id="roto">0°</output></label><input id="rot" type="range" min="-180" max="180" step="1" value="0"></div>
+  <div class="row"><label for="st">3D layout</label><select id="st"><option value="mono">Mono (2D)</option><option value="ou">Stereo over-under (left eye on top)</option><option value="sbs">Stereo side-by-side (left eye on left)</option></select></div>
   <div id="seq" hidden>
     <div class="row"><label for="fr">Frame <output id="fro">1 / 1</output></label><input id="fr" type="range" min="0" max="0" step="1" value="0"></div>
     <div class="row tools"><button id="play" class="btn" type="button">Pause</button><label>FPS <input id="fps" type="number" min="1" max="120" value="24"></label><label class="chk"><input id="loop" type="checkbox" checked> Loop</label></div>
   </div>
   <label class="chk"><input id="tm" type="checkbox" checked> Filmic tone mapping</label>
   <button id="vr" class="btn primary" disabled>Enter VR</button>
-  <p class="hint">In VR: thumbsticks left/right rotate, up/down change exposure; trigger plays/pauses, grip restarts. On desktop, drag to look and scroll to zoom.</p>
+  <p class="hint">In VR: left stick left/right flicks to the previous/next item; right stick left/right rotates; either stick up/down changes exposure; trigger plays/pauses, grip restarts. On desktop, drag to look and scroll to zoom.</p>
 </main>
+<aside id="lib" hidden></aside>
 
 <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/fflate@0.7.4/umd/index.js"></script>
@@ -71,6 +90,35 @@ body.drag #ui{outline:2px dashed var(--accent)}
   const sphere = new THREE.Mesh(geo, mat);
   sphere.visible = false;
   scene.add(sphere);
+
+  /* Stereo: two eye spheres share the texture, each showing one half, on per-eye layers (1 = left, 2 = right) */
+  const eyeL = new THREE.Mesh(geo.clone(), mat), eyeR = new THREE.Mesh(geo.clone(), mat);
+  eyeL.layers.set(1); eyeR.layers.set(2); eyeL.visible = eyeR.visible = false;
+  scene.add(eyeL, eyeR);
+  const baseUV = geo.attributes.uv.array.slice();
+  let stereo = 'mono';
+  function setStereo(m) {
+    stereo = m;
+    [eyeL, eyeR].forEach((e, k) => {
+      const uv = e.geometry.attributes.uv;
+      for (let i = 0; i < uv.count; i++) {
+        let u = baseUV[2 * i], v = baseUV[2 * i + 1];
+        if (m === 'ou') v = v * 0.5 + (k ? 0 : 0.5);
+        if (m === 'sbs') u = u * 0.5 + (k ? 0.5 : 0);
+        uv.setXY(i, u, v);
+      }
+      uv.needsUpdate = true;
+    });
+    camera.layers.mask = m === 'mono' ? 1 : 2; // desktop preview shows the left eye
+  }
+  function autoStereo(w, h) {
+    const r = w / h, m = Math.abs(r - 1) < 0.05 ? 'ou' : Math.abs(r - 4) < 0.1 ? 'sbs' : 'mono';
+    $('st').value = m; setStereo(m);
+  }
+  setStereo('mono');
+  $('st').addEventListener('change', e => setStereo(e.target.value));
+  renderer.xr.addEventListener('sessionstart', () => { camera.layers.mask = 1; });
+  renderer.xr.addEventListener('sessionend', () => setStereo(stereo));
 
   let ev = 0, yaw = 0, lookYaw = 0, lookPitch = 0, tex = null, loaded = false, vrOK = false;
 
@@ -107,7 +155,7 @@ body.drag #ui{outline:2px dashed var(--accent)}
     loader.load('local://', t => {
       if (tex) tex.dispose();
       clearSeq(); setTone(true); tex = t; mat.map = t; loaded = true; sphere.visible = true; mat.needsUpdate = true;
-      const w = t.image.width, h = t.image.height;
+      const w = t.image.width, h = t.image.height; autoStereo(w, h);
       msg(file.name + ' · ' + w + '×' + h + (Math.max(w, h) > renderer.capabilities.maxTextureSize ? ' — larger than this GPU supports, may not display' : ''));
       pending = null; updVR();
     }, undefined, err => {
@@ -181,7 +229,124 @@ body.drag #ui{outline:2px dashed var(--accent)}
     }
     acc -= 1; show(nx, e);
   }
+  /* Library: group picked files into stills, sequences and HDR/EXR, with thumbnails */
+  const MIN_SEQ = 4;
+  let libHas = false, libOpen = true;
+  let libItems = [], libIdx = -1, flickArmed = true;
+  function selectItem(i) {
+    if (!libItems.length) return;
+    libIdx = (i + libItems.length) % libItems.length;
+    const it = libItems[libIdx];
+    $('lib').querySelectorAll('.tile.on').forEach(x => x.classList.remove('on'));
+    it.b.classList.add('on'); it.b.scrollIntoView({ block: 'nearest' });
+    it.open();
+  }
+  const stepItem = d => selectItem(d > 0 ? libIdx + 1 : libIdx < 0 ? -1 : libIdx - 1);
+  function setLibOpen(o) {
+    libOpen = o;
+    $('lib').hidden = !(o && libHas);
+    $('libbtn').textContent = o ? 'Hide thumbnails' : 'Show thumbnails';
+  }
+  $('libbtn').addEventListener('click', () => setLibOpen(!libOpen));
+  let libTok = 0;
+  const natural = (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true });
+  const seqBase = n => { const m = n.match(/^(.*?)\d+\.[^.]+$/); return m ? m[1] : null; };
+  function groupFiles(files) {
+    const stills = [], hdrs = [], groups = new Map();
+    for (const f of files) {
+      const x = extOf(f);
+      if (x === 'hdr' || x === 'exr') { hdrs.push(f); continue; }
+      if (!IMG.includes(x)) continue;
+      const base = seqBase(f.name);
+      if (base === null) { stills.push(f); continue; }
+      const key = (f.webkitRelativePath || '').replace(/[^/]*$/, '') + base + '|' + x;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(f);
+    }
+    const seqs = [];
+    for (const g of groups.values()) {
+      if (g.length >= MIN_SEQ) seqs.push({ name: seqBase(g[0].name).replace(/[._\-\s]+$/, '') || 'sequence', files: g.sort(natural) });
+      else stills.push(...g);
+    }
+    seqs.sort((a, b) => a.name.localeCompare(b.name));
+    return { stills: stills.sort(natural), seqs, hdrs: hdrs.sort(natural) };
+  }
+  function buildLib(d) {
+    const root = $('lib'), tk = ++libTok;
+    libItems = []; libIdx = -1;
+    root.replaceChildren();
+    if (!d) { libHas = false; root.hidden = true; $('libbtn').hidden = true; return; }
+    libHas = true; $('libbtn').hidden = false; setLibOpen(true);
+    const hd = document.createElement('div'); hd.className = 'lhead';
+    const ht = document.createElement('span'); ht.textContent = 'Library';
+    const hx = document.createElement('button'); hx.type = 'button'; hx.textContent = '×'; hx.setAttribute('aria-label', 'Close library'); hx.onclick = () => setLibOpen(false);
+    hd.append(ht, hx); root.append(hd);
+    const jobs = [];
+    const section = (title, items, make) => {
+      if (!items.length) return;
+      const h = document.createElement('h2'); h.textContent = title + ' (' + items.length + ')';
+      const g = document.createElement('div'); g.className = 'grid';
+      for (const it of items) g.appendChild(make(it));
+      root.append(h, g);
+    };
+    const tile = (name, sub, thumb, ph, open) => {
+      const b = document.createElement('button'); b.type = 'button'; b.className = 'tile';
+      let top;
+      if (thumb) { top = document.createElement('canvas'); top.width = 192; top.height = 96; jobs.push([thumb, top]); }
+      else { top = document.createElement('div'); top.className = 'ph'; top.textContent = ph; }
+      const t = document.createElement('b'); t.textContent = name; t.title = name;
+      const s = document.createElement('i'); s.textContent = sub;
+      b.append(top, t, s);
+      libItems.push({ b, open }); b.onclick = () => selectItem(libItems.findIndex(x => x.b === b));
+      return b;
+    };
+    section('Stills', d.stills, f => tile(f.name, extOf(f).toUpperCase(), f, '', () => openImages([f])));
+    section('Sequences', d.seqs, q => tile(q.name, q.files.length + ' frames', q.files[0], '', () => openImages(q.files)));
+    section('HDR / EXR', d.hdrs, f => tile(f.name, extOf(f).toUpperCase(), null, extOf(f).toUpperCase(), () => openFile(f)));
+    (async () => {
+      for (const [f, c] of jobs) {
+        if (tk !== libTok) return;
+        try {
+          const bm = await createImageBitmap(f, { resizeWidth: 192, resizeQuality: 'medium' });
+          if (tk !== libTok) { bm.close(); return; }
+          c.getContext('2d').drawImage(bm, 0, 0, c.width, c.height); bm.close();
+        } catch (e) { /* keep placeholder */ }
+      }
+    })();
+  }
   async function openFiles(list) {
+    const files = [...list];
+    if (!files.length) return;
+    const { stills, seqs, hdrs } = groupFiles(files);
+    const total = stills.length + seqs.length + hdrs.length;
+    if (!total) { msg('Please choose .hdr, .exr or .png files.', true); return; }
+    if (total === 1) { buildLib(null); return stills.length ? openImages(stills) : seqs.length ? openImages(seqs[0].files) : openFile(hdrs[0]); }
+    buildLib({ stills, seqs, hdrs });
+    msg(total + ' items found — pick one from the library.');
+  }
+  /* Where the browser supports it, read the folder in place (a “view files” permission instead of an upload dialog) */
+  async function walkDir(dh, path, out) {
+    for await (const [name, h] of dh.entries()) {
+      if (h.kind === 'directory') await walkDir(h, path + name + '/', out);
+      else if (/\.(png|jpe?g|webp|hdr|exr)$/i.test(name)) {
+        const f = await h.getFile();
+        Object.defineProperty(f, 'webkitRelativePath', { value: path + name });
+        out.push(f);
+      }
+    }
+  }
+  document.querySelector('label[for="fd"]').addEventListener('click', async e => {
+    if (!window.showDirectoryPicker) return;
+    e.preventDefault();
+    try {
+      const dir = await window.showDirectoryPicker({ mode: 'read' });
+      msg('Reading ' + dir.name + '…');
+      const out = []; await walkDir(dir, '', out);
+      openFiles(out);
+    } catch (err) { if (err.name !== 'AbortError') $('fd').click(); }
+  });
+  $('fd').addEventListener('change', e => { openFiles(e.target.files); e.target.value = ''; });
+  async function openImages(list) {
     const files = [...list];
     if (!files.length) return;
     const imgs = files.filter(f => IMG.includes(extOf(f))).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
@@ -204,6 +369,7 @@ body.drag #ui{outline:2px dashed var(--accent)}
     tex = t; mat.map = t; loaded = true; sphere.visible = true; setTone(false); updVR();
     seq = { files: imgs, n, w, h, cur: 0, want: -1, cache: new Map([[0, { bmp: first }]]), ahead: clamp(Math.floor(3.5e8 / (w * h * 4)), 2, 12), playing: n > 1 };
     acc = 0; $('seq').hidden = n < 2; $('fr').max = n - 1; syncSeq();
+    autoStereo(w, h);
     const big = Math.max(w, h) > renderer.capabilities.maxTextureSize;
     msg((n > 1 ? n + ' frames · ' : imgs[0].name + ' · ') + w + '×' + h +
       (big ? ' — larger than this GPU supports, may not display' : n > 1 && w > 4096 ? ' — large frames may play slower than real time' : ''));
@@ -269,12 +435,17 @@ body.drag #ui{outline:2px dashed var(--accent)}
       for (const src of s.inputSources) {
         const a = src.gamepad && src.gamepad.axes;
         if (!a || a.length < 4) continue;
-        if (Math.abs(a[2]) > 0.2) { yaw += a[2] * dt * 1.5; moved = true; }
+        if (src.handedness === 'left') {
+          if (flickArmed && Math.abs(a[2]) > 0.7) { flickArmed = false; stepItem(a[2] > 0 ? 1 : -1); }
+          else if (Math.abs(a[2]) < 0.3) flickArmed = true;
+        } else if (Math.abs(a[2]) > 0.2) { yaw += a[2] * dt * 1.5; moved = true; }
         if (Math.abs(a[3]) > 0.2) { ev = clamp(ev - a[3] * dt * 2, -5, 5); moved = true; }
       }
       if (moved) sync();
     } else camera.rotation.set(lookPitch, lookYaw, 0);
-    sphere.rotation.y = yaw;
+    sphere.visible = loaded && stereo === 'mono';
+    eyeL.visible = eyeR.visible = loaded && stereo !== 'mono';
+    sphere.rotation.y = eyeL.rotation.y = eyeR.rotation.y = yaw;
     renderer.toneMappingExposure = Math.pow(2, ev);
     renderer.render(scene, camera);
   });
