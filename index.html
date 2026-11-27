@@ -27,6 +27,7 @@ body.drag #ui{outline:2px dashed var(--accent)}
 #fps{width:56px;box-sizing:border-box;padding:6px;border:1px solid var(--line);border-radius:8px;background:transparent;color:var(--fg);font:inherit}
 .pick{display:flex;gap:8px}.pick .btn{width:auto;flex:1}
 [hidden]{display:none!important}
+label[for="f"],#libbtn,#lib,.row,#seq,.chk{display:none!important}
 .lhead{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;font-weight:700}.lhead button{border:0;background:transparent;color:var(--fg);font-size:24px;line-height:1;padding:2px 8px;cursor:pointer}
 #lib{position:fixed;top:calc(12px + env(safe-area-inset-top,0px));right:12px;width:min(440px,calc(100% - 24px));max-height:calc(100% - 24px - env(safe-area-inset-top,0px));overflow:auto;box-sizing:border-box;padding:14px 16px;border:1px solid var(--line);border-radius:16px;background:var(--panel);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
 #lib[hidden]{display:none}
@@ -60,7 +61,7 @@ body.drag #ui{outline:2px dashed var(--accent)}
   </div>
   <label class="chk"><input id="tm" type="checkbox" checked> Filmic tone mapping</label>
   <button id="vr" class="btn primary" disabled>Enter VR</button>
-  <p class="hint">In VR: left stick left/right flicks to the previous/next item; right stick left/right rotates; either stick up/down changes exposure; trigger plays/pauses, grip restarts. On desktop, drag to look and scroll to zoom.</p>
+  <p class="hint">Right controller: stick left/right = previous/next · stick up/down = exposure · B = thumbnails · A = exit VR · trigger = play/pause · hold grip + stick left/right = rotate. On desktop, drag to look and scroll to zoom.</p>
 </main>
 <aside id="lib" hidden></aside>
 
@@ -74,11 +75,13 @@ body.drag #ui{outline:2px dashed var(--accent)}
   const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
   const cv = $('c');
 
-  const renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: true });
+  const renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: false });
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   renderer.outputEncoding = THREE.sRGBEncoding;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.xr.enabled = true;
+  renderer.xr.setFramebufferScaleFactor(1.5); // render the VR view above default resolution for a sharper image
+  renderer.xr.setFoveation(0);
 
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(75, 1, 0.1, 200);
@@ -292,7 +295,7 @@ body.drag #ui{outline:2px dashed var(--accent)}
     const tile = (name, sub, thumb, ph, open) => {
       const b = document.createElement('button'); b.type = 'button'; b.className = 'tile';
       let top;
-      if (thumb) { top = document.createElement('canvas'); top.width = 192; top.height = 96; jobs.push([thumb, top]); }
+      if (thumb) { top = document.createElement('canvas'); top.width = 384; top.height = 192; jobs.push([thumb, top]); }
       else { top = document.createElement('div'); top.className = 'ph'; top.textContent = ph; }
       const t = document.createElement('b'); t.textContent = name; t.title = name;
       const s = document.createElement('i'); s.textContent = sub;
@@ -307,9 +310,9 @@ body.drag #ui{outline:2px dashed var(--accent)}
       for (const [f, c] of jobs) {
         if (tk !== libTok) return;
         try {
-          const bm = await createImageBitmap(f, { resizeWidth: 192, resizeQuality: 'medium' });
+          const bm = await createImageBitmap(f, { resizeWidth: 384, resizeQuality: 'high' });
           if (tk !== libTok) { bm.close(); return; }
-          c.getContext('2d').drawImage(bm, 0, 0, c.width, c.height); bm.close();
+          const cx = c.getContext('2d'); cx.imageSmoothingQuality = 'high'; cx.drawImage(bm, 0, 0, c.width, c.height); bm.close();
         } catch (e) { /* keep placeholder */ }
       }
     })();
@@ -322,7 +325,7 @@ body.drag #ui{outline:2px dashed var(--accent)}
     if (!total) { msg('Please choose .hdr, .exr or .png files.', true); return; }
     if (total === 1) { buildLib(null); return stills.length ? openImages(stills) : seqs.length ? openImages(seqs[0].files) : openFile(hdrs[0]); }
     buildLib({ stills, seqs, hdrs });
-    msg(total + ' items found — pick one from the library.');
+    selectItem(0);
   }
   /* Where the browser supports it, read the folder in place (a “view files” permission instead of an upload dialog) */
   async function walkDir(dh, path, out) {
@@ -364,7 +367,7 @@ body.drag #ui{outline:2px dashed var(--accent)}
     const t = new THREE.Texture(first);
     t.encoding = THREE.sRGBEncoding; t.flipY = false; t.wrapS = THREE.RepeatWrapping;
     t.minFilter = THREE.LinearFilter; t.magFilter = THREE.LinearFilter; t.generateMipmaps = false;
-    if (n === 1) { t.generateMipmaps = true; t.minFilter = THREE.LinearMipmapLinearFilter; t.anisotropy = renderer.capabilities.getMaxAnisotropy(); }
+    if (n === 1 || w <= 4096) { t.generateMipmaps = true; t.minFilter = THREE.LinearMipmapLinearFilter; t.anisotropy = renderer.capabilities.getMaxAnisotropy(); }
     t.needsUpdate = true;
     tex = t; mat.map = t; loaded = true; sphere.visible = true; setTone(false); updVR();
     seq = { files: imgs, n, w, h, cur: 0, want: -1, cache: new Map([[0, { bmp: first }]]), ahead: clamp(Math.floor(3.5e8 / (w * h * 4)), 2, 12), playing: n > 1 };
@@ -379,9 +382,83 @@ body.drag #ui{outline:2px dashed var(--accent)}
   $('fr').addEventListener('input', e => { if (seq) seq.playing = false; seekTo(+e.target.value); });
   renderer.xr.addEventListener('sessionstart', () => {
     const ss = renderer.xr.getSession();
-    ss.addEventListener('selectstart', togglePlay);
-    ss.addEventListener('squeezestart', () => seekTo(0));
+    ss.addEventListener('selectstart', e => {
+      if (e.inputSource.handedness === 'left') return;
+      if (wallOpen) { const i = wallIdx; toggleWall(); selectItem(i); } else togglePlay();
+    });
+    
   });
+
+  /* VR: all controls on the right controller; B opens a floating thumbnail wall */
+  const WALL_COLS = 4, WALL_PER = 12;
+  const WC = document.createElement('canvas'); WC.width = 1024; WC.height = 768;
+  const wx = WC.getContext('2d');
+  const wallTex = new THREE.CanvasTexture(WC); wallTex.encoding = THREE.sRGBEncoding;
+  const wall = new THREE.Mesh(new THREE.PlaneGeometry(3, 2.25), new THREE.MeshBasicMaterial({ map: wallTex, transparent: true, depthTest: false, depthWrite: false, toneMapped: false }));
+  wall.renderOrder = 10; wall.visible = false; scene.add(wall);
+  let wallOpen = false, wallIdx = 0, wallDrawn = 0, prevA = false, prevB = false, gripHeld = false;
+  const wdir = new THREE.Vector3();
+  const clip = (s, n) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
+  function drawWall() {
+    const n = libItems.length, page = Math.floor(wallIdx / WALL_PER), pages = Math.max(1, Math.ceil(n / WALL_PER));
+    wx.clearRect(0, 0, 1024, 768);
+    wx.fillStyle = 'rgba(14,16,20,0.94)'; wx.fillRect(0, 0, 1024, 768);
+    wx.fillStyle = '#eef1f5'; wx.font = 'bold 34px sans-serif'; wx.textAlign = 'left'; wx.fillText('Library', 40, 52);
+    wx.fillStyle = '#9aa4b2'; wx.font = '24px sans-serif'; wx.textAlign = 'right'; wx.fillText('Page ' + (page + 1) + ' / ' + pages, 984, 52);
+    for (let k = 0; k < WALL_PER; k++) {
+      const i = page * WALL_PER + k; if (i >= n) break;
+      const tx = 40 + (k % WALL_COLS) * 244, ty = 84 + Math.floor(k / WALL_COLS) * 190, b = libItems[i].b;
+      wx.fillStyle = '#2a2e36'; wx.fillRect(tx, ty, 212, 106);
+      const c = b.querySelector('canvas');
+      if (c) wx.drawImage(c, tx, ty, 212, 106);
+      else { wx.fillStyle = '#9aa4b2'; wx.font = 'bold 30px sans-serif'; wx.textAlign = 'center'; wx.fillText((b.querySelector('.ph') || {}).textContent || '', tx + 106, ty + 66); }
+      wx.textAlign = 'left'; wx.fillStyle = '#eef1f5'; wx.font = '600 22px sans-serif'; wx.fillText(clip(b.querySelector('b').textContent, 17), tx, ty + 138);
+      wx.fillStyle = '#9aa4b2'; wx.font = '18px sans-serif'; wx.fillText(b.querySelector('i').textContent, tx, ty + 164);
+      if (i === wallIdx) { wx.strokeStyle = '#6ea0ff'; wx.lineWidth = 6; wx.strokeRect(tx - 6, ty - 6, 224, 182); }
+    }
+    wx.fillStyle = '#9aa4b2'; wx.font = '22px sans-serif'; wx.textAlign = 'center';
+    wx.fillText('Stick: move    Trigger: open    B: close', 512, 730);
+    wallTex.needsUpdate = true; wallDrawn = performance.now();
+  }
+  function toggleWall() {
+    if (!libItems.length) return;
+    wallOpen = !wallOpen;
+    if (wallOpen) {
+      wallIdx = Math.max(0, libIdx);
+      wdir.set(0, 0, -1).applyQuaternion(camera.quaternion); wdir.y = 0;
+      if (wdir.lengthSq() < 1e-4) wdir.set(0, 0, -1);
+      wdir.normalize();
+      wall.position.set(camera.position.x + wdir.x * 2, camera.position.y, camera.position.z + wdir.z * 2);
+      wall.lookAt(camera.position);
+      drawWall();
+    }
+    wall.visible = wallOpen;
+  }
+  function moveWall(d) { wallIdx = clamp(wallIdx + d, 0, libItems.length - 1); drawWall(); }
+  renderer.xr.addEventListener('sessionend', () => { wallOpen = false; wall.visible = false; });
+  function vrInput(s, dt) {
+    let moved = false;
+    for (const src of s.inputSources) {
+      if (src.handedness === 'left' || !src.gamepad) continue;
+      const a = src.gamepad.axes, bt = src.gamepad.buttons;
+      gripHeld = !!(bt[1] && bt[1].pressed);
+      const A = !!(bt[4] && bt[4].pressed), B = !!(bt[5] && bt[5].pressed);
+      if (A && !prevA) { prevA = true; s.end(); return moved; }
+      if (B && !prevB) toggleWall();
+      prevA = A; prevB = B;
+      if (a.length < 4) continue;
+      const ax = a[2], ay = a[3];
+      if (flickArmed && (Math.abs(ax) > 0.7 || Math.abs(ay) > 0.7)) {
+        if (wallOpen) { flickArmed = false; moveWall(Math.abs(ax) > Math.abs(ay) ? Math.sign(ax) : Math.sign(ay) * WALL_COLS); }
+        else if (!gripHeld && Math.abs(ax) > Math.abs(ay)) { flickArmed = false; stepItem(ax > 0 ? 1 : -1); }
+      } else if (Math.abs(ax) < 0.3 && Math.abs(ay) < 0.3) flickArmed = true;
+      if (!wallOpen) {
+        if (gripHeld && Math.abs(ax) > 0.2) { yaw += ax * dt * 1.5; moved = true; }
+        if (Math.abs(ay) > 0.2 && Math.abs(ay) > Math.abs(ax)) { ev = clamp(ev - ay * dt * 2, -5, 5); moved = true; }
+      }
+    }
+    return moved;
+  }
 
   /* Controls */
   $('ev').addEventListener('input', e => { ev = +e.target.value; sync(); });
@@ -429,18 +506,10 @@ body.drag #ui{outline:2px dashed var(--accent)}
   renderer.setAnimationLoop(() => {
     const now = performance.now(), dt = Math.min(0.05, (now - last) / 1000); last = now;
     stepSeq(dt);
+    if (wallOpen && now - wallDrawn > 400) drawWall();
     const s = renderer.xr.getSession();
     if (s) {
-      let moved = false;
-      for (const src of s.inputSources) {
-        const a = src.gamepad && src.gamepad.axes;
-        if (!a || a.length < 4) continue;
-        if (src.handedness === 'left') {
-          if (flickArmed && Math.abs(a[2]) > 0.7) { flickArmed = false; stepItem(a[2] > 0 ? 1 : -1); }
-          else if (Math.abs(a[2]) < 0.3) flickArmed = true;
-        } else if (Math.abs(a[2]) > 0.2) { yaw += a[2] * dt * 1.5; moved = true; }
-        if (Math.abs(a[3]) > 0.2) { ev = clamp(ev - a[3] * dt * 2, -5, 5); moved = true; }
-      }
+      let moved = vrInput(s, dt);
       if (moved) sync();
     } else camera.rotation.set(lookPitch, lookYaw, 0);
     sphere.visible = loaded && stereo === 'mono';
